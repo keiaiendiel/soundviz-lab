@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound / Image Lab</title>
+<meta name="description" content="A live instrument: one microphone signal rendered through dozens of visual dialects of sound. Audio-reactive, parametric, white on black.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+<style>
+/*__STYLES__*/
+</style>
+</head>
+<body>
+
+<header class="lab"><canvas id="glyphfield" aria-hidden="true"></canvas><div class="wrap">
+  <div class="kicker"><span class="wm">SOUND<b>/</b>IMAGE</span><span class="sep">visual-art research &middot; kindl.work</span></div>
+  <h1 class="title">Sound <span class="slash">/</span> Image, a laboratory</h1>
+  <p class="lede">One sound, many ways of seeing it. Turn on the microphone and a single live signal, a voice, the room, the hall, is rendered at once through every visual dialect: lines, fields, rasters, glyphs, particles, structures. Silence reads as stillness, noise as turbulence. Press <span class="mono">live</span> to go full width and page through the specimens against whatever you are listening to, and decide which belong on the wall.</p>
+  <div class="meta-row" id="metarow"></div>
+</div></header>
+
+<div class="controls"><div class="wrap">
+  <span class="wm-min">Sound <span class="slash">/</span> Image</span>
+  <div class="filters">
+    <span class="ctl-label">Family</span><div class="chips" id="groups"></div>
+    <span class="ctl-label">Tag</span><div class="chips" id="tags"></div>
+    <input class="search" id="search" placeholder="search specimens">
+  </div>
+  <span class="spacer"></span>
+  <button class="btn" id="bare">show info</button>
+  <button class="btn accent live-cta" id="live">&#9658; live (mic)</button>
+  <button class="btn" id="palette">palette: signal</button>
+  <button class="btn" id="playpause">pause</button>
+  <span class="count" id="count"></span>
+</div></div>
+
+<main class="wrap">
+  <div class="featured" id="featured"></div>
+  <div class="section-div" id="restdiv"><span class="sd-l"></span><span class="sd-t">more specimens</span><span class="sd-l"></span></div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<div class="overlay" id="overlay"></div>
+
+<footer class="lab"><div class="wrap">
+  <div class="cols">
+    <div class="col">
+      <h3>What this is</h3>
+      <p>A live instrument, not a website. Each card is a specimen: one method for making sound visible. Press <span class="mono">live</span> and allow the microphone, and every specimen reads the same signal at once, the waveform, its spectrum, its loudness, its onsets. With the mic off, a gentle synthetic signal keeps the catalogue breathing so the visual register stays legible on its own.</p>
+    </div>
+    <div class="col">
+      <h3>How to read it</h3>
+      <ul>
+        <li><span class="mono">live</span> enters a fullscreen, one-specimen-at-a-time pager; swipe or <span class="mono">&larr; &rarr;</span> to move, <span class="mono">mic</span> to listen.</li>
+        <li>Each tile opens the same way; the corner <span class="mono">sliders</span> icon opens its patch (parameters).</li>
+        <li>Filter by <span class="mono">family</span> or <span class="mono">tag</span>; search by name or lineage.</li>
+        <li><span class="mono">palette</span> switches amber / signal (blue) / night / paper.</li>
+        <li>Keys: <span class="mono">space</span> pause, <span class="mono">m</span> mic, <span class="mono">t</span> palette, <span class="mono">[ ]</span> sensitivity, <span class="mono">esc</span> close.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3>How it is built</h3>
+      <p>One self-contained HTML file. Every specimen is Canvas 2D against a small contract (metadata plus a <span class="mono">draw(ctx,t,params,theme,audio)</span> function), driven by one shared loop that runs only the visible specimens and feeds each the live audio frame. Parameters set the baseline; audio modulates around it; a per-specimen <span class="mono">Audio drive</span> dials the depth.</p>
+      <div class="lineage">lineage&nbsp; <b>Pe&scaron;&aacute;nek</b> 1928 &rarr; <b>Va&scaron;ulka</b> 1974 &rarr; <b>Granular Synthesis</b> 1994 &rarr; <b>J&uacute;dov&aacute;</b> 2018 &rarr; <b>Kindl</b> 2026</div>
+    </div>
+  </div>
+</div></footer>
+
+<script>
+/*__LABUTIL__*/
+</script>
+<script>
+window.LAB = { demos: [], register: function (d) { this.demos.push(d); } };
+</script>
+<script>
+/*__DEMOS__*/
+</script>
+<script>
+/*__AUDIO__*/
+</script>
+<script>
+/*__APP__*/
+</script>
+</body>
+</html>
