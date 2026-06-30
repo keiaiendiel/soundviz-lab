@@ -4738,6 +4738,11 @@ LAB.register({
 
     var start = s.beamPos;
     var end = start + beamSpeed;
+    // stop exactly at the end of the word this frame instead of wrapping the beam
+    // back over the first letter (otherwise the hot head re-lights the old word's
+    // opening glyph just before the swap, leaving a ghost fragment top-left).
+    var wrapped = end >= total;
+    if (wrapped) end = total;
 
     // analog wobble: faint mains-style sine on y plus per-vertex jitter
     var wob = Math.sin(t * 8.0) * 0.6 + Math.sin(t * 3.0) * 0.4;
@@ -4810,14 +4815,14 @@ LAB.register({
     plotRange(headStart, end, 1.0, sw + 0.6, glow > 0);
     ctx.shadowBlur = 0;
 
-    // advance; each full traversal of the word the beam swaps SOUND <-> IMAGE,
-    // so the two words alternate continuously as the line reaches the end.
-    var wrapped = end >= total;
-    s.beamPos = ((end % total) + total) % total;
-    if (!isFinite(s.beamPos)) s.beamPos = 0;
+    // advance; on a full traversal the beam swaps SOUND <-> IMAGE so the two words
+    // alternate continuously as the line reaches the end.
     if (wrapped) {
       s.WORD = (s.WORD === 'IMAGE') ? 'SOUND' : 'IMAGE';
-      s.path = null;   // force a rebuild with the new word on the next frame
+      s.path = null;   // rebuild with the new word next frame (resets beamPos to 0)
+    } else {
+      s.beamPos = end;
+      if (!isFinite(s.beamPos)) s.beamPos = 0;
     }
   }
 });
