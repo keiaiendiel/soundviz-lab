@@ -36,12 +36,12 @@
     'spectral-smear', 'spectrogram-scroll', 'slit-scan', 'reversible-spectrogram', 'reaction-diffusion',
     'schlieren-plume', 'wave-membrane', 'faraday-caustics', 'faraday-interference', 'spatial-fourier',
     'julia-fractal', 'walking-droplet', 'belousov-zhabotinsky', 'pointcloud-rotate', 'chladni-bessel',
-    'chladni-nodal', 'chladni-sand', 'moire-grids', 'topographic-contour', 'blue-noise-stipple',
+    'chladni-nodal', 'chladni-sand', 'moire-grids', 'topographic-contour',
     'ascii-waveform', 'halftone-raster', 'error-diffusion-dither', 'fft-bars', 'waveform-ribbon',
     'curl-flow-field', 'kelvin-helmholtz', 'rayleigh-benard', 'granular-cloud', 'particle-envelope-swarm',
     'phyllotaxis-vogel', 'strange-attractor', 'soliton-kdv', 'harmonic-ladder', 'tonnetz-lattice',
-    'lichtenberg-breakdown', 'magnetic-pendulum-basins', 'glyph-field', 'phase-rings', 'feedback-trails',
-    'ferrofluid-spikes', 'gradient-bloom-field', 'photoelastic-fringes', 'thin-film-fringes'
+    'lichtenberg-breakdown', 'magnetic-pendulum-basins', 'glyph-field', 'feedback-trails',
+    'ferrofluid-spikes', 'gradient-bloom-field'
   ];
   function orank(id) { var i = ORDER.indexOf(id); return i < 0 ? 1e6 : i; }
   function norm(g) { return String(g || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim(); }

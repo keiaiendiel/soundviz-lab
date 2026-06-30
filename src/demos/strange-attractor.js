@@ -49,9 +49,10 @@ LAB.register({
     // iter slider sets density target; cap real iterations to 4000 for the loop guard,
     // map the rest of the density onto per-point alpha so the figure thickens.
     var want = LABUTIL.clamp(p.iter, 2000, 40000);
-    var iters = Math.round(LABUTIL.clamp(Math.min(want, 4000) * (0.6 + 0.8 * react * lv) + bt * 1500 * react, 200, 4000));
+    var iters = Math.round(LABUTIL.clamp(Math.min(want, 4000) * (0.85 + 0.7 * react * lv) + bt * 1500 * react, 200, 4000));
     var densityBoost = LABUTIL.clamp(want / 4000, 1, 10);
-    var alpha = LABUTIL.clamp(0.045 * densityBoost * (1 + 0.5 * react * lv + 0.6 * react * bt), 0.02, 0.35);
+    var alpha = LABUTIL.clamp(0.075 * densityBoost * (1 + 0.5 * react * lv + 0.6 * react * bt), 0.04, 0.45);
+    var dot = 1.7;   // bigger than 1px so the filament reads clearly
 
     var x = s.x, y = s.y;
     if (!isFinite(x) || !isFinite(y)) { x = 0; y = 0; }
@@ -66,7 +67,7 @@ LAB.register({
       if (!isFinite(x) || !isFinite(y)) { x = 0; y = 0; continue; }
       var px = cx + x * R;
       var py = cy + y * R;
-      ctx.fillRect(px, py, 1, 1);
+      ctx.fillRect(px - dot * 0.5, py - dot * 0.5, dot, dot);
     }
 
     s.x = x; s.y = y;

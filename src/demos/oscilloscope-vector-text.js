@@ -3,7 +3,7 @@ LAB.register({
   title: 'Oscilloscope Vector Text',
   group: 'Oscillographic',
   essence: 'Text drawn as a single XY beam tracing stroke-font letters as continuous parametric paths with phosphor persistence.',
-  blurb: 'A stroke font, not an outline font. The beam draws each letter as a continuous polyline, blanks across pen-up gaps, and leaves a decaying green-amber trail. Hershey vectors, Vectrex, oscilloscope music.',
+  blurb: 'A stroke font, not an outline font. The beam draws each letter as a continuous polyline, blanks across pen-up gaps, and leaves a decaying green-amber trail. The word alternates SOUND and IMAGE on each full pass of the beam. Hershey vectors, Vectrex, oscilloscope music.',
   tags: ['oscillographic','line','text','glyph','monochrome','realtime'],
   lineage: 'Allen Hershey vector fonts (1967, Naval Weapons Lab), Vectrex vector display, oscilloscope-music XY lettering, Xenakis/Tektronix CRT terminals',
   dialect: 'Oscillographic/XY',
@@ -252,9 +252,15 @@ LAB.register({
     plotRange(headStart, end, 1.0, sw + 0.6, glow > 0);
     ctx.shadowBlur = 0;
 
-    // advance
+    // advance; each full traversal of the word the beam swaps SOUND <-> IMAGE,
+    // so the two words alternate continuously as the line reaches the end.
+    var wrapped = end >= total;
     s.beamPos = ((end % total) + total) % total;
     if (!isFinite(s.beamPos)) s.beamPos = 0;
+    if (wrapped) {
+      s.WORD = (s.WORD === 'IMAGE') ? 'SOUND' : 'IMAGE';
+      s.path = null;   // force a rebuild with the new word on the next frame
+    }
   }
 });
 

@@ -1,6 +1,6 @@
 # Sound / Image, a laboratory
 
-A clickable research instrument that catalogs the ways sound can be turned into image, light, and motion. **59 live generative specimens** across eleven families, each a different method for making sound visible, drawn as a parametric Canvas2D sketch.
+A clickable research instrument that catalogs the ways sound can be turned into image, light, and motion. **55 live generative specimens** across eleven families, each a different method for making sound visible, drawn as a parametric Canvas2D sketch.
 
 It is a live instrument, not a static page. Turn on the microphone and one signal, a voice, the room, whatever you are listening to, is rendered at once through every visual dialect. Silence reads as stillness, noise as turbulence. With the microphone off, a gentle synthetic signal keeps the catalogue breathing so each visual register stays legible on its own.
 
@@ -10,9 +10,9 @@ Open `index.html` in any browser, or visit the live page (GitHub Pages).
 
 ## What is inside
 
-Eleven families: oscillographic (Lissajous, line-scan, Rutt-Etra, Fourier epicycles, vector text), spectral (spectrogram, waveform ribbon, FFT, phase-vocoder smear, spectral terrain), cymatic and modal (Chladni, Faraday interference, Faraday caustics, modal plate), fluid and field (schlieren, curl flow, vector field, reaction-diffusion), particle and attractor (swarm, granular, point cloud, de Jong, Lorenz), vibration and matter (drum membrane, vibrating strings, Chladni sand, scanned string), frequency synthesis (epicycles, spatial Fourier, harmonic ladder, Tonnetz), fractal and recursion (Julia, resonance tree, Lichtenberg breakdown), raster glyph text (halftone, glyph field, ASCII, reversible spectrogram, dither, blue-noise stipple), line and geometry (contour, phase rings, vanishing point, moire), texture and feedback (photoelastic, datamosh, slit-scan, gradient bloom, thin-film, ferrofluid).
+Eleven families: oscillographic (Lissajous, line-scan, Rutt-Etra, Fourier epicycles, vector text), spectral (spectrogram, waveform ribbon, FFT, phase-vocoder smear, spectral terrain), cymatic and modal (Chladni, Faraday interference, Faraday caustics, modal plate), fluid and field (schlieren, curl flow, vector field, reaction-diffusion), particle and attractor (swarm, granular, point cloud, de Jong, Lorenz), vibration and matter (drum membrane, vibrating strings, Chladni sand, scanned string), frequency synthesis (epicycles, spatial Fourier, harmonic ladder, Tonnetz), fractal and recursion (Julia, resonance tree, Lichtenberg breakdown), raster glyph text (halftone, glyph field, ASCII, reversible spectrogram, dither), line and geometry (contour, vanishing point, moire), texture and feedback (datamosh, slit-scan, gradient bloom, ferrofluid).
 
-Several specimens implement real physics and algorithms: Faraday-wave caustics from the surface Jacobian, Newton-ring thin-film interference, the Niemeyer-Pietronero-Wiesmann dielectric-breakdown model, the Rosensweig ferrofluid instability, Floyd-Steinberg error diffusion, void-and-cluster blue noise, Takens delay embedding, the neo-Riemannian Tonnetz, and the Lorenz 1963 system.
+Several specimens implement real physics and algorithms: Faraday-wave caustics from the surface Jacobian, the Niemeyer-Pietronero-Wiesmann dielectric-breakdown model, the Rosensweig ferrofluid instability, Floyd-Steinberg error diffusion, Takens delay embedding, the neo-Riemannian Tonnetz, and the Lorenz 1963 system.
 
 ## Controls
 

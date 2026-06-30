@@ -758,205 +758,6 @@ LAB.register({
 
 
 
-/* ===== blue-noise-stipple.js ===== */
-LAB.register({
-  id: 'blue-noise-stipple',
-  title: 'Blue-Noise Stipple',
-  group: 'Raster, glyph, text',
-  essence: 'Poisson-disk blue-noise dots whose local density tracks an intensity field by thresholding a void-and-cluster texture.',
-  blurb: 'Dots that never clump and never line up, placed so denser fields draw darker. A precomputed void-and-cluster blue-noise texture thresholded by a moving field gives importance sampling for free. Ulichney 1993, Secord 2002.',
-  tags: ['dots','raster','texture','field','monochrome','realtime'],
-  lineage: 'Robert Ulichney void-and-cluster (SPIE 1993), Adrian Secord Weighted Voronoi Stippling (NPAR 2002), Poisson-disk / blue-noise importance sampling',
-  dialect: '-',
-  palette: 'Monochrome dots on black: white, or warm amber for the accent variant. Dot density carries all tone; no grays, no fills between dots.',
-  paramNotes: 'dotSize sets stipple radius. coverage sets overall fill (global threshold offset). fieldFreq and driftSpeed shape and move the intensity field that density tracks. contrast sharpens how strongly density follows the field. Audio: a.level raises overall stipple coverage and a.bands act as a per-row brightness source, so energetic frequency bands thicken into denser horizontal stripes (a spectrogram read in dots).',
-  params: [
-    { key: 'dotSize', label: 'Dot radius (px)', min: 0.75, max: 3, step: 0.25, value: 1.25 },
-    { key: 'coverage', label: 'Overall coverage', min: 0.05, max: 0.6, step: 0.01, value: 0.28 },
-    { key: 'fieldFreq', label: 'Field frequency', min: 0.5, max: 5, step: 0.25, value: 1.5 },
-    { key: 'driftSpeed', label: 'Field drift speed', min: 0, max: 1.5, step: 0.05, value: 0.3 },
-    { key: 'contrast', label: 'Density contrast', min: 0.5, max: 3, step: 0.1, value: 1.4 },
-    { key: 'react', label: 'Audio drive', min: 0, max: 1.5, step: 0.05, value: 0.85 }
-  ],
-  init(s, w, h) {
-    // ----- precompute a tileable blue-noise threshold texture via void-and-cluster -----
-    var T = 64;                       // tile size
-    var N = T * T;
-    s.T = T;
-    var b = new Uint8Array(N);        // binary pattern
-    var energy = new Float32Array(N); // running energy field (incremental)
-    var rank = new Int32Array(N);
-    for (var i = 0; i < N; i++) rank[i] = -1;
-
-    var rng = LABUTIL.mulberry32(987654321);
-    var sigma = 1.9;
-    var inv2s2 = 1 / (2 * sigma * sigma);
-    var rad = 6;                      // splat radius ~ 3 sigma
-
-    // precompute the Gaussian splat kernel with toroidal-safe offsets
-    var kernel = [];
-    for (var ky = -rad; ky <= rad; ky++) {
-      for (var kx = -rad; kx <= rad; kx++) {
-        var d2 = kx * kx + ky * ky;
-        if (d2 > rad * rad) continue;
-        kernel.push([kx, ky, Math.exp(-d2 * inv2s2)]);
-      }
-    }
-    var KLEN = kernel.length;
-
-    function splat(p, sign) {
-      var px = p % T, py = (p / T) | 0;
-      for (var k = 0; k < KLEN; k++) {
-        var ke = kernel[k];
-        var x = px + ke[0]; if (x < 0) x += T; else if (x >= T) x -= T;
-        var y = py + ke[1]; if (y < 0) y += T; else if (y >= T) y -= T;
-        energy[y * T + x] += sign * ke[2];
-      }
-    }
-
-    // seed ~10% ones
-    var ones = 0, want = Math.max(1, Math.round(N * 0.1));
-    var guard = 0;
-    while (ones < want && guard < N * 20) {
-      guard++;
-      var idx = (rng() * N) | 0;
-      if (idx >= N) idx = N - 1;
-      if (!b[idx]) { b[idx] = 1; splat(idx, 1); ones++; }
-    }
-
-    function tightestCluster() {        // set pixel with highest energy
-      var best = -1, bv = -Infinity;
-      for (var q = 0; q < N; q++) { if (b[q] && energy[q] > bv) { bv = energy[q]; best = q; } }
-      return best;
-    }
-    function largestVoid() {            // unset pixel with lowest energy
-      var best = -1, bv = Infinity;
-      for (var q = 0; q < N; q++) { if (!b[q] && energy[q] < bv) { bv = energy[q]; best = q; } }
-      return best;
-    }
-
-    // snapshot the initial binary pattern for restoration
-    var initial = b.slice(0);
-
-    // ---- Phase 1: make the initial pattern progressive (rank downward) ----
-    var remaining = ones;
-    var ph1guard = 0;
-    while (remaining > 0 && ph1guard < N) {
-      ph1guard++;
-      var tc = tightestCluster();
-      if (tc < 0) break;
-      b[tc] = 0; splat(tc, -1);
-      remaining--;
-      rank[tc] = remaining;           // rank = ones remaining after removal
-    }
-
-    // ---- restore the initial pattern ----
-    for (var r = 0; r < N; r++) energy[r] = 0;
-    b.set(initial);
-    var cnt = 0;
-    for (var rr = 0; rr < N; rr++) { if (b[rr]) { splat(rr, 1); cnt++; } }
-
-    // ---- Phase 2: fill voids up to 50%, ranking upward ----
-    var half = (N / 2) | 0;
-    var ph2guard = 0;
-    while (cnt < half && ph2guard < N) {
-      ph2guard++;
-      var lv = largestVoid();
-      if (lv < 0) break;
-      rank[lv] = cnt;                 // rank = ones count before adding
-      b[lv] = 1; splat(lv, 1);
-      cnt++;
-    }
-
-    // ---- Phase 3: rank the remaining 50% by largest cluster of zeros ----
-    // Treat zeros as the minority: invert the energy interpretation by finding,
-    // among the still-zero pixels, the one whose REMOVAL relieves the tightest void,
-    // i.e. the zero pixel with highest energy (most surrounded), set it, rank upward.
-    var ph3guard = 0;
-    while (cnt < N && ph3guard < N) {
-      ph3guard++;
-      // zero pixel with highest energy = tightest remaining cluster of zeros' complement
-      var best = -1, bv = -Infinity;
-      for (var z = 0; z < N; z++) { if (!b[z] && energy[z] > bv) { bv = energy[z]; best = z; } }
-      if (best < 0) break;
-      rank[best] = cnt;
-      b[best] = 1; splat(best, 1);
-      cnt++;
-    }
-
-    // ---- ranks -> flat-histogram thresholds in [0,1) ----
-    var BN = new Float32Array(N);
-    for (var f = 0; f < N; f++) {
-      var rk = rank[f];
-      if (rk < 0) rk = 0;
-      BN[f] = (rk + 0.5) / N;
-    }
-    s.BN = BN;
-  },
-  draw(ctx, w, h, t, p, s, theme, a) {
-    var clamp = LABUTIL.clamp;
-    var TAU = LABUTIL.TAU;
-    var BN = s.BN, T = s.T;
-    var react = (p.react == null ? 0.85 : p.react);
-
-    ctx.fillStyle = theme.bg;
-    ctx.fillRect(0, 0, w, h);
-    if (!BN) return;
-
-    var dotSize = clamp(p.dotSize, 0.75, 3);
-    var coverage = clamp(p.coverage, 0.05, 0.6);
-    var ff = clamp(p.fieldFreq, 0.5, 5);
-    var ds = p.driftSpeed;
-    var contrast = clamp(p.contrast, 0.5, 3);
-    var act = clamp(Math.max(a.level, a.peak * 0.7, a.beat) * react, 0, 1);
-    if (s.lastT == null) s.lastT = t;
-    var dt = t - s.lastT; if (!(dt > 0) || dt > 0.1) dt = 0.016; s.lastT = t;
-    // field drift advances with audio so the stipple field is near-still in silence
-    s.ph = (s.ph || 0) + dt * ds * (0.06 + 1.4 * act);
-    // loudness lifts overall coverage; bands feed a per-row brightness source
-    var covEff = clamp(coverage * (0.55 + 1.1 * react * a.level), 0.02, 0.95);
-    var bands = a.bands;
-
-    // stipple grid spacing: tie to dot size, but keep the per-frame loop bounded
-    var spacing = Math.max(2, Math.round(2 + (3 - dotSize)));
-    var nx = Math.ceil(w / spacing), ny = Math.ceil(h / spacing);
-    var MAX = 26000;
-    while (nx * ny > MAX) { spacing++; nx = Math.ceil(w / spacing); ny = Math.ceil(h / spacing); }
-
-    ctx.fillStyle = theme.ink;
-    ctx.beginPath();
-    for (var j = 0; j < ny; j++) {
-      var py = (j + 0.5) * spacing;
-      var fy = py / h;
-      var ty = ((Math.round(py) % T) + T) % T;
-      // band for this row: top = high freq, bottom = low freq
-      var bi = (clamp(1 - fy, 0, 1) * 31) | 0; if (bi > 31) bi = 31;
-      var bandV = bands ? bands[bi] : 0; if (!(bandV >= 0)) bandV = 0;
-      for (var i = 0; i < nx; i++) {
-        var px = (i + 0.5) * spacing;
-        var fx = px / w;
-        // moving intensity field in [0,1]
-        var I = 0.5 + 0.5 * Math.sin(TAU * ff * fx + s.ph) * Math.sin(TAU * ff * fy - s.ph * 0.6);
-        I = clamp(0.5 + (I - 0.5) * contrast, 0, 1);
-        // band energy pushes the intensity up for that row (brightness source)
-        I = clamp(I + react * (bandV - 0.25) * 1.1, 0, 1);
-        // importance: target density proportional to intensity
-        var d = covEff * I;
-        // blue-noise threshold at this position, tiling the texture
-        var tx = ((Math.round(px) % T) + T) % T;
-        var thr = BN[ty * T + tx];
-        if (thr < d) {
-          ctx.moveTo(px + dotSize, py);
-          ctx.arc(px, py, dotSize, 0, TAU);
-        }
-      }
-    }
-    ctx.fill();
-  }
-});
-
-
-
 /* ===== chladni-bessel.js ===== */
 LAB.register({
   id: 'chladni-bessel',
@@ -3894,7 +3695,7 @@ LAB.register({
     { key: 'rho', label: 'rho (Rayleigh)', min: 0.5, max: 90, step: 0.5, value: 28 },
     { key: 'sigma', label: 'sigma (Prandtl)', min: 1, max: 20, step: 0.5, value: 10 },
     { key: 'speed', label: 'Integration speed', min: 1, max: 30, step: 1, value: 12 },
-    { key: 'trail', label: 'Trail length', min: 200, max: 8000, step: 100, value: 3000 },
+    { key: 'trail', label: 'Trail length', min: 200, max: 8000, step: 100, value: 5200 },
     { key: 'projAngle', label: 'View rotation', min: 0, max: 6.28, step: 0.05, value: 0.6 },
     { key: 'react', label: 'Audio drive', min: 0, max: 1.5, step: 0.05, value: 0.85 }
   ],
@@ -3943,7 +3744,7 @@ LAB.register({
     var sigma = LABUTIL.clamp(p.sigma + (ce - 0.5) * 3 * react, 1, 20);
     // near-still in silence: integration nearly halts when quiet, runs with sound
     var speed = Math.round(LABUTIL.clamp(p.speed * 1.3 * act, 0, 60));
-    var glow = LABUTIL.clamp(0.85 + react * (0.4 * lv + 0.5 * bt), 0.4, 1.6);
+    var glow = LABUTIL.clamp(1.05 + react * (0.4 * lv + 0.5 * bt), 0.5, 1.8);
     var trail = Math.round(LABUTIL.clamp(p.trail, 200, s.MAXTRAIL));
     var ang = LABUTIL.clamp(p.projAngle, 0, 6.2832);
     var beta = s.beta;
@@ -3990,7 +3791,7 @@ LAB.register({
     if (nDraw < 2) return;
 
     var ca = Math.cos(ang), sa = Math.sin(ang);
-    var scale = Math.min(w, h) / 60;
+    var scale = Math.min(w, h) / 48;
     var cx = w * 0.5, cy = h * 0.5;
 
     function project(px, py, pz) {
@@ -4002,7 +3803,7 @@ LAB.register({
     var startPt = (s.head - nDraw + cap) % cap;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    ctx.lineWidth = 1.25;
+    ctx.lineWidth = LABUTIL.clamp(2.2 + react * 1.0 * lv, 1.6, 4);
 
     var BANDS = 32;
     var per = Math.ceil((nDraw - 1) / BANDS);
@@ -4010,7 +3811,7 @@ LAB.register({
       var sIdx = b * per;
       if (sIdx >= nDraw - 1) break;
       var eIdx = Math.min(nDraw - 1, sIdx + per);
-      var aMid = LABUTIL.lerp(0.14, 1.0, (sIdx + eIdx) * 0.5 / Math.max(1, nDraw - 1));
+      var aMid = LABUTIL.lerp(0.30, 1.0, (sIdx + eIdx) * 0.5 / Math.max(1, nDraw - 1));
       ctx.strokeStyle = LABUTIL.rgba(theme.ink, LABUTIL.clamp(aMid * glow, 0, 1));
       ctx.beginPath();
       var pi0 = (startPt + sIdx) % cap;
@@ -4030,7 +3831,7 @@ LAB.register({
     if (isFinite(Ph[0]) && isFinite(Ph[1])) {
       ctx.fillStyle = LABUTIL.rgba(theme.accent, 1);
       ctx.beginPath();
-      var headR = LABUTIL.clamp(2 + react * (2.5 * lv + 3.5 * bt), 1, 9);
+      var headR = LABUTIL.clamp(2.8 + react * (2.5 * lv + 3.5 * bt), 1.5, 10);
       ctx.arc(Ph[0], Ph[1], headR, 0, LABUTIL.TAU);
       ctx.fill();
     }
@@ -4760,7 +4561,7 @@ LAB.register({
   title: 'Oscilloscope Vector Text',
   group: 'Oscillographic',
   essence: 'Text drawn as a single XY beam tracing stroke-font letters as continuous parametric paths with phosphor persistence.',
-  blurb: 'A stroke font, not an outline font. The beam draws each letter as a continuous polyline, blanks across pen-up gaps, and leaves a decaying green-amber trail. Hershey vectors, Vectrex, oscilloscope music.',
+  blurb: 'A stroke font, not an outline font. The beam draws each letter as a continuous polyline, blanks across pen-up gaps, and leaves a decaying green-amber trail. The word alternates SOUND and IMAGE on each full pass of the beam. Hershey vectors, Vectrex, oscilloscope music.',
   tags: ['oscillographic','line','text','glyph','monochrome','realtime'],
   lineage: 'Allen Hershey vector fonts (1967, Naval Weapons Lab), Vectrex vector display, oscilloscope-music XY lettering, Xenakis/Tektronix CRT terminals',
   dialect: 'Oscillographic/XY',
@@ -5009,9 +4810,15 @@ LAB.register({
     plotRange(headStart, end, 1.0, sw + 0.6, glow > 0);
     ctx.shadowBlur = 0;
 
-    // advance
+    // advance; each full traversal of the word the beam swaps SOUND <-> IMAGE,
+    // so the two words alternate continuously as the line reaches the end.
+    var wrapped = end >= total;
     s.beamPos = ((end % total) + total) % total;
     if (!isFinite(s.beamPos)) s.beamPos = 0;
+    if (wrapped) {
+      s.WORD = (s.WORD === 'IMAGE') ? 'SOUND' : 'IMAGE';
+      s.path = null;   // force a rebuild with the new word on the next frame
+    }
   }
 });
 
@@ -5118,301 +4925,6 @@ LAB.register({
     ctx.beginPath();
     ctx.arc(cx, cy, 4 + env * 6, 0, LABUTIL.TAU);
     ctx.stroke();
-  }
-});
-
-
-/* ===== phase-rings.js ===== */
-LAB.register({
-  id: 'phase-rings',
-  title: 'Concentric Phase Rings',
-  group: 'Line and geometry',
-  essence: 'Razor-thin rings expanding from sources, colliding into moire interference.',
-  blurb: 'The interferometer dialect in its clean form. Each source emits expanding razor-thin concentric rings; where two ring systems overlap, their sum produces moire interference fringes, the holography image directly. Drawn as pure white circles on black it is delicate and diagrammatic, the Nicolai milch register, and it holds the witness / sustain state. The collisions are the event, so source placement and wavelength are everything.',
-  tags: ['line', 'moire', 'field', 'monochrome', 'slow'],
-  lineage: 'Digital off-axis color holography (Montrésor, Picart, LAUM); Carsten Nicolai milch 75 hz; concentric-ring interference. Scientific anchor: spherical-wave interference, two-source moire.',
-  dialect: 'Phase Interferometer',
-  palette: 'monochrome ink',
-  paramNotes: 'Wavelength (ring spacing) and source count are the levers that control how dense the moire becomes; expand speed sets the pulse. Source positions could animate slowly. Colour off; the interference itself is the only texture and it must stay luminance. Audio drive (react) gives each source a band (a.bass/a.mid/a.high): louder energy tightens and speeds its rings, and a.beat shoves every ring outward as a pulse.',
-  params: [
-    { key: 'wavelength', label: 'Ring spacing', min: 8, max: 60, step: 2, value: 22 },
-    { key: 'sources', label: 'Sources', min: 1, max: 5, step: 1, value: 2 },
-    { key: 'expand', label: 'Expand speed', min: 0, max: 3, step: 0.1, value: 1 },
-    { key: 'thin', label: 'Ring thinness', min: 1, max: 8, step: 0.5, value: 4 },
-    { key: 'react', label: 'Audio drive', min: 0, max: 1.5, step: 0.05, value: 0.85 }
-  ],
-  init(s, w, h){
-    s.bw = 0;
-    s.bh = 0;
-    s.buf = null;
-  },
-  draw(ctx, w, h, t, p, s, theme, a){
-    var U = LABUTIL, TAU = U.TAU;
-    var react = (p.react == null ? 0.85 : p.react);
-    var bass = (a && isFinite(a.bass)) ? U.clamp(a.bass, 0, 1) : 0;
-    var mid = (a && isFinite(a.mid)) ? U.clamp(a.mid, 0, 1) : 0;
-    var high = (a && isFinite(a.high)) ? U.clamp(a.high, 0, 1) : 0;
-    var beat = (a && isFinite(a.beat)) ? U.clamp(a.beat, 0, 1) : 0;
-    var en = [bass, mid, high];
-    var lvl = (a && isFinite(a.level)) ? U.clamp(a.level, 0, 1) : 0;
-    var peak = (a && isFinite(a.peak)) ? U.clamp(a.peak, 0, 1) : 0;
-    // audio activity gates ring drift and source orbit; beat still pulses (beatPulse below)
-    var act = U.clamp(Math.max(lvl, peak * 0.7, beat) * react, 0, 1);
-    s.tph = (s.tph || 0) + (a.dt || 0.016) * (0.06 + 1.0 * act);
-    if (!isFinite(s.tph)) s.tph = 0;
-    // small offscreen buffer (<=160x160) computed per frame, then scaled up
-    var BW = 150, BH = Math.max(2, Math.min(160, Math.round(BW * h / Math.max(1, w))));
-    if (!s.buf || s.bw !== BW || s.bh !== BH){
-      s.buf = ctx.createImageData(BW, BH);
-      s.bw = BW; s.bh = BH;
-    }
-    var img = s.buf;
-    var data = img.data;
-    var nSrc = Math.max(1, Math.round(p.sources));
-    var wl = Math.max(2, p.wavelength);
-    var thin = p.thin;
-    var expand = p.expand;
-    // parse theme colours to rgb so we can write pixels
-    function toRGB(col){
-      var m = U.rgba(col, 1).match(/rgba?\(([0-9.]+),\s*([0-9.]+),\s*([0-9.]+)/);
-      if (!m) return [233, 230, 220];
-      return [parseFloat(m[1]) | 0, parseFloat(m[2]) | 0, parseFloat(m[3]) | 0];
-    }
-    var bg = toRGB(theme.bg);
-    var ink = toRGB(theme.ink);
-    // source positions in buffer space (orbiting slowly); each source also
-    // tracks one frequency band so its rings tighten and speed with energy
-    var sx = [], sy = [], wlSrc = [], phSrc = [];
-    var ocx = BW * 0.5, ocy = BH * 0.5;
-    var orbR = Math.min(BW, BH) * 0.30;
-    // wavelength in buffer units (scale from CSS px by buffer ratio)
-    var wlB = wl * (BW / Math.max(1, w));
-    if (wlB < 1.2) wlB = 1.2;
-    var basePhase = s.tph * expand * 30 * (BW / Math.max(1, w));
-    var beatPulse = react * beat * wlB * 1.3;   // a beat shoves every ring outward
-    for (var si = 0; si < nSrc; si++){
-      var ang = TAU * si / nSrc + s.tph * 0.13;
-      var rr = orbR * (nSrc === 1 ? 0 : 1);
-      sx.push(ocx + Math.cos(ang) * rr);
-      sy.push(ocy + Math.sin(ang + 0.4) * rr);
-      var e = en[si % 3];
-      var wls = wlB * (1 - 0.5 * react * e);
-      if (wls < 1.2) wls = 1.2;
-      wlSrc.push(wls);
-      phSrc.push(basePhase * (1 + 0.5 * react * e) + beatPulse);
-    }
-    var idx = 0;
-    for (var y = 0; y < BH; y++){
-      for (var x = 0; x < BW; x++){
-        var sum = 0;
-        for (var k = 0; k < nSrc; k++){
-          var dx = x - sx[k], dy = y - sy[k];
-          var d = Math.sqrt(dx * dx + dy * dy);
-          sum += Math.sin((d - phSrc[k]) / wlSrc[k] * TAU);
-        }
-        var val = sum / nSrc; // [-1,1]
-        // thin bright rings on the zero-crossings of the interference
-        var bright = 1 - Math.abs(val) * thin;
-        if (bright < 0) bright = 0; else if (bright > 1) bright = 1;
-        // gentle gamma for crisp filaments
-        bright = bright * bright;
-        var r = bg[0] + (ink[0] - bg[0]) * bright;
-        var g = bg[1] + (ink[1] - bg[1]) * bright;
-        var b = bg[2] + (ink[2] - bg[2]) * bright;
-        data[idx++] = r;
-        data[idx++] = g;
-        data[idx++] = b;
-        data[idx++] = 255;
-      }
-    }
-    // paint buffer, then scale to full canvas
-    // fill bg first (covers any letterbox)
-    ctx.fillStyle = theme.bg;
-    ctx.fillRect(0, 0, w, h);
-    // use a temp canvas via putImageData on an offscreen then drawImage scaled
-    if (!s.tmp || s.tmp.width !== BW || s.tmp.height !== BH){
-      s.tmp = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(BW, BH) : document.createElement('canvas');
-      s.tmp.width = BW; s.tmp.height = BH;
-      s.tctx = s.tmp.getContext('2d');
-    }
-    s.tctx.putImageData(img, 0, 0);
-    var prevSmooth = ctx.imageSmoothingEnabled;
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(s.tmp, 0, 0, BW, BH, 0, 0, w, h);
-    ctx.imageSmoothingEnabled = prevSmooth;
-  }
-});
-
-
-/* ===== photoelastic-fringes.js ===== */
-LAB.register({
-  id: 'photoelastic-fringes',
-  title: 'Photoelastic Stress Fringes',
-  group: 'Texture and feedback',
-  essence: 'Isochromatic bands radiating from a stress point, fracture-light on a percussive strike.',
-  blurb: 'The percussion dialect. Under polarised light a stressed transparent solid shows isochromatic fringes, nested bands of light around stress concentrations; a strike fires a burst of fringes that propagate from the impact point and decay along fracture paths. This is Dialect 3, the Brittle Stress Matrix, the highest-impact lowest-cost prototype, brutalist and stark. The bands are a sine of the stress field, so the math is cheap and the read is immediate.',
-  tags: ['field', 'raster', 'line', 'monochrome', 'realtime'],
-  lineage: 'David Brewster photoelasticity 1816; CAS State Key Lab ultrasonic photoelasticity; Robert Henke CBM 8032 + Krystof Kintera brutalism. Scientific anchor: stress-optic law, isochromatic fringe order.',
-  dialect: 'Brittle Stress Matrix',
-  palette: 'monochrome ink',
-  paramNotes: 'Fringe density (stress-optic constant) and strike decay are the levers; a strike trigger (a slider you pulse, or auto-fire on a timer) is the event. Number of stress points matters. The fringes are born monochrome under crossed polars; do not add the rainbow isochromatics, that breaks the discipline. Audio: a.beat strikes the stress points, a.centroid sets fringe density, a.level drives intensity (react scales the drive).',
-  params: [
-    { key: 'fringeDensity', label: 'Fringe density', min: 2, max: 20, step: 1, value: 9 },
-    { key: 'decay', label: 'Strike decay', min: 0.9, max: 0.995, step: 0.005, value: 0.96 },
-    { key: 'points', label: 'Stress points', min: 1, max: 5, step: 1, value: 2 },
-    { key: 'fracture', label: 'Fracture spread', min: 0, max: 1, step: 0.05, value: 0.4 },
-    { key: 'react', label: 'Audio drive', min: 0, max: 1.5, step: 0.05, value: 0.85 }
-  ],
-  init(s, w, h) {
-    var rnd = LABUTIL.mulberry32(1729);
-    s.src = [];
-    for (var i = 0; i < 5; i++) {
-      s.src.push({
-        bx: 0.18 + rnd() * 0.64,   // base position (fraction)
-        by: 0.18 + rnd() * 0.64,
-        wob: rnd() * 6.28,          // wander phase
-        ax: rnd() * 6.28,           // anisotropy axis phase
-        fire: rnd() * 6.28,         // firing phase offset
-        energy: 0,
-        last: -1
-      });
-    }
-    s.lastT = 0;
-    s.img = null; // small ImageData field buffer, allocated on first draw
-  },
-  draw(ctx, w, h, t, p, s, theme, a) {
-    if (!s.src) this.init(s, w, h);
-    if (!a) a = {};
-    var dt = LABUTIL.clamp(t - s.lastT, 0, 0.1);
-    s.lastT = t;
-
-    // Audio drive: beat strikes points, centroid sets density, level sets intensity.
-    var react = (p.react == null ? 0.85 : p.react);
-    var aLevel = LABUTIL.clamp(a.level || 0, 0, 1);
-    var aCent = LABUTIL.clamp(a.centroid || 0, 0, 1);
-    var aBeat = LABUTIL.clamp(a.beat || 0, 0, 1);
-    // Activity gate: silence -> near-zero, so auto-fire, wobble and axis rotation
-    // nearly stop. Sound (level, peak, beat) brings the field back to life.
-    var act = LABUTIL.clamp(Math.max(aLevel, (a.peak || 0) * 0.7, aBeat) * react, 0, 1);
-    // Slow phase for source wobble + anisotropy rotation; idle crawl when quiet.
-    s.ph = (s.ph || 0) + (a.dt || 0.016) * (0.06 + 1.3 * act);
-
-    var pts = Math.max(1, Math.min(5, Math.round(p.points)));
-    // per-frame decay factor normalised to ~60fps so the slider feels right
-    var decF = Math.pow(p.decay, dt * 60);
-
-    for (var i = 0; i < pts; i++) {
-      var src = s.src[i];
-      // always decay; the auto-fire clock now only re-strikes with energy scaled
-      // by activity, so in silence the points never re-light on their own
-      src.energy *= decF;
-      // auto-fire: each source has its own slow clock; on a rising zero-cross, strike
-      var phase = t * 1.3 + src.fire;
-      var cyc = Math.floor(phase / Math.PI);
-      if (cyc !== src.last) {
-        src.last = cyc;
-        if (act > src.energy) src.energy = act;   // strike magnitude tracks sound
-      }
-      // audio strike: a beat above a per-source threshold re-fires the point, so
-      // louder onsets light more of the field at once (staggered across points)
-      if (react > 0 && aBeat > (0.35 + i * 0.12)) {
-        var hit = LABUTIL.clamp(react * aBeat, 0, 1);
-        if (hit > src.energy) src.energy = hit;
-      }
-      // faint residual stress so the field is never fully dark; static when quiet,
-      // breathing only as sound returns, so silence reads as a still frame
-      var floor = 0.10 + 0.05 * act * (0.72 + 0.28 * Math.sin(s.ph * 0.55 + src.wob));
-      if (src.energy < floor) src.energy = floor;
-    }
-
-    // background, with a faint persistence to soften the strike onset
-    ctx.fillStyle = theme.bg;
-    ctx.fillRect(0, 0, w, h);
-
-    // coarse buffer field. Kept small so the manual upscale stays well under
-    // the ~4000 inner-iteration budget even when the whole field is lit.
-    var bw = 80;
-    var bh = Math.max(36, Math.min(80, Math.round(bw * h / Math.max(1, w))));
-    if (!s.img || s.img.width !== bw || s.img.height !== bh) {
-      s.img = ctx.createImageData(bw, bh);
-    }
-    var data = s.img.data;
-
-    // resolve ink colour to rgb once
-    var ink = LABUTIL.rgba(theme.ink, 1);
-    var im = ink.match(/[\d.]+/g);
-    var ir = +im[0], ig = +im[1], ib = +im[2];
-    // accent rgb for the warm seed at the impact core
-    var ac = LABUTIL.rgba(theme.accent, 1).match(/[\d.]+/g);
-    var ar = +ac[0], ag = +ac[1], ab = +ac[2];
-
-    var dens = p.fringeDensity * 3 * (1 + react * (aCent - 0.3) * 1.2);
-    if (dens < 2) dens = 2;
-    var intens = LABUTIL.clamp(0.7 + react * aLevel * 0.9, 0, 1.7);
-    var frac = p.fracture;
-    // falloff radii expressed as a fraction of buffer size so the fringe rings
-    // keep the same visual scale regardless of buffer resolution
-    var rGlow = (bw * 0.34); var rGlow2 = rGlow * rGlow;       // gaussian sigma^2 region
-    var rCore = (bw * 0.07); var rCore2 = rCore * rCore;
-
-    // precompute active source positions in buffer space
-    var sx = [], sy = [], se = [], saxis = [];
-    for (var k = 0; k < pts; k++) {
-      var sc = s.src[k];
-      var wob = 0.03;
-      sx.push((sc.bx + Math.sin(s.ph * 0.3 + sc.wob) * wob) * bw);
-      sy.push((sc.by + Math.cos(s.ph * 0.27 + sc.wob) * wob) * bh);
-      se.push(sc.energy);
-      saxis.push(sc.ax + s.ph * 0.2);
-    }
-
-    var idx = 0;
-    for (var y = 0; y < bh; y++) {
-      for (var x = 0; x < bw; x++) {
-        var stress = 0;
-        var core = 0;
-        for (var n = 0; n < pts; n++) {
-          var e = se[n];
-          if (e < 0.004) continue;
-          var ddx = x - sx[n];
-          var ddy = y - sy[n];
-          var d2 = ddx * ddx + ddy * ddy;
-          var ang = Math.atan2(ddy, ddx);
-          // fracture anisotropy: stress leaks along an axis
-          var dir = Math.cos((ang - saxis[n]) * 2) * frac;
-          // gaussian falloff, scaled to buffer resolution
-          var fall = Math.exp(-d2 / rGlow2);
-          stress += e * fall * (1 + dir);
-          core += e * Math.exp(-d2 / rCore2);
-        }
-        var fringe = Math.abs(Math.sin(stress * dens));
-        var bright = fringe * LABUTIL.clamp(stress, 0, 1);
-        core = LABUTIL.clamp(core, 0, 1);
-        // mix toward accent only at the hot core, very restrained
-        var rr = ir + (ar - ir) * core * 0.55;
-        var gg = ig + (ag - ig) * core * 0.55;
-        var bb = ib + (ab - ib) * core * 0.55;
-        var al = LABUTIL.clamp((bright + core * 0.3) * intens, 0, 1);
-        data[idx] = rr; data[idx + 1] = gg; data[idx + 2] = bb;
-        data[idx + 3] = (al * 255) | 0;
-        idx += 4;
-      }
-    }
-
-    // Upscale the buffer to the full canvas with one fillRect per buffer cell.
-    // The buffer is small (<= 80x80 = 6400) and we skip near-empty cells, so
-    // the worst-case fill count stays under the inner-loop budget.
-    var cw = w / bw, ch = h / bh;
-    var step = (bw * bh > 5000) ? 2 : 1;
-    for (var yy = 0; yy < bh; yy += step) {
-      for (var xx = 0; xx < bw; xx += step) {
-        var di = (yy * bw + xx) * 4;
-        var alpha = data[di + 3] / 255;
-        if (alpha < 0.02) continue;
-        ctx.fillStyle = 'rgba(' + data[di] + ',' + data[di + 1] + ',' + data[di + 2] + ',' + alpha.toFixed(3) + ')';
-        ctx.fillRect(xx * cw, yy * ch, cw * step + 1, ch * step + 1);
-      }
-    }
   }
 });
 
@@ -7751,9 +7263,10 @@ LAB.register({
     // iter slider sets density target; cap real iterations to 4000 for the loop guard,
     // map the rest of the density onto per-point alpha so the figure thickens.
     var want = LABUTIL.clamp(p.iter, 2000, 40000);
-    var iters = Math.round(LABUTIL.clamp(Math.min(want, 4000) * (0.6 + 0.8 * react * lv) + bt * 1500 * react, 200, 4000));
+    var iters = Math.round(LABUTIL.clamp(Math.min(want, 4000) * (0.85 + 0.7 * react * lv) + bt * 1500 * react, 200, 4000));
     var densityBoost = LABUTIL.clamp(want / 4000, 1, 10);
-    var alpha = LABUTIL.clamp(0.045 * densityBoost * (1 + 0.5 * react * lv + 0.6 * react * bt), 0.02, 0.35);
+    var alpha = LABUTIL.clamp(0.075 * densityBoost * (1 + 0.5 * react * lv + 0.6 * react * bt), 0.04, 0.45);
+    var dot = 1.7;   // bigger than 1px so the filament reads clearly
 
     var x = s.x, y = s.y;
     if (!isFinite(x) || !isFinite(y)) { x = 0; y = 0; }
@@ -7768,180 +7281,12 @@ LAB.register({
       if (!isFinite(x) || !isFinite(y)) { x = 0; y = 0; continue; }
       var px = cx + x * R;
       var py = cy + y * R;
-      ctx.fillRect(px, py, 1, 1);
+      ctx.fillRect(px - dot * 0.5, py - dot * 0.5, dot, dot);
     }
 
     s.x = x; s.y = y;
   }
 });
-
-
-/* ===== thin-film-fringes.js ===== */
-LAB.register({
-  id: 'thin-film-fringes',
-  title: 'Thin-Film Interference',
-  group: 'Texture and feedback',
-  essence: 'Monochromatic light reflecting off the two faces of a thin film interferes with itself. As the film thickness drifts, the interference contours crawl across the surface as Newton-ring fringes.',
-  blurb: 'Two reflections, one off the top of a thin film and one off the bottom, recombine with a phase difference set by the extra path 2*n*d through the film. At normal incidence the reflected intensity is cos^2 of half that phase. Hold the wavelength fixed and vary the thickness d(x,y,t) and the bright and dark fringes trace contours of constant thickness, the same circular Newton rings you see in an oil slick or between two pressed lenses.',
-  tags: ['optics', 'texture', 'field', 'raster', 'monochrome', 'feedback', 'moire'],
-  lineage: "Newton's rings; two-beam interference; thin-film reflectance with half-wave phase shift; OpenStax University Physics III optics.",
-  dialect: 'Phase Interferometer',
-  palette: 'Single amber channel modulated by cos^2 fringe intensity. No spectral rainbow (monochromatic source by definition). Dark fringes near-black, bright fringes warm amber.',
-  paramNotes: 'filmindex n scales optical path; wavelength sets fringe spacing (smaller lambda = denser rings); bumprate animates the thickness deformation; bumpcount sets how many drifting thickness lobes overlap (Newton-ring centers); tilt adds a linear thickness wedge that turns rings into straight contour fringes. Audio: a.centroid densifies the fringes, a.level drives brightness, a.beat sends ring ripples across the film (react scales the whole drive).',
-  params: [
-    { key: 'filmindex', label: 'Film index n', min: 1, max: 2.4, step: 0.01, value: 1.45 },
-    { key: 'wavelength', label: 'Wavelength', min: 0.004, max: 0.05, step: 0.001, value: 0.014 },
-    { key: 'bumprate', label: 'Deform rate', min: 0, max: 1.5, step: 0.01, value: 0.35 },
-    { key: 'bumpcount', label: 'Ring centers', min: 1, max: 6, step: 1, value: 3 },
-    { key: 'tilt', label: 'Wedge tilt', min: 0, max: 1, step: 0.01, value: 0.2 },
-    { key: 'react', label: 'Audio drive', min: 0, max: 1.5, step: 0.05, value: 0.85 }
-  ],
-  init(s, w, h) {
-    s.bw = 150;
-    s.bh = Math.max(40, Math.min(130, Math.round(s.bw * h / Math.max(1, w))));
-    try {
-      s.off = new OffscreenCanvas(s.bw, s.bh);
-      s.octx = s.off.getContext('2d');
-      s.img = s.octx.createImageData(s.bw, s.bh);
-    } catch (e) {
-      s.off = null;
-    }
-    // Fixed lobe layout, deterministic. Each lobe is a gaussian bump in the
-    // thickness field, a Newton-ring center. Phases and base centers seeded.
-    var rnd = LABUTIL.mulberry32(31459265);
-    s.lobes = [];
-    for (var i = 0; i < 6; i++) {
-      s.lobes.push({
-        cx: (rnd() * 1.4 - 0.7),
-        cy: (rnd() * 1.4 - 0.7),
-        ph: rnd() * 6.2831853,
-        sig: 0.30 + rnd() * 0.30,   // lobe width 0.30..0.60
-        amp: 6 + rnd() * 6          // amplitude in wavelength units
-      });
-    }
-  },
-  draw(ctx, w, h, t, p, s, theme, a) {
-    if (!s.lobes) this.init(s, w, h);
-    if (!a) a = {};
-    ctx.fillStyle = theme.bg;
-    ctx.fillRect(0, 0, w, h);
-
-    // Audio drive: centroid densifies fringes, level lifts brightness, beat ripples.
-    var react = (p.react == null ? 0.85 : p.react);
-    var aLevel = LABUTIL.clamp(a.level || 0, 0, 1);
-    var aCent = LABUTIL.clamp(a.centroid || 0, 0, 1);
-    var aBeat = LABUTIL.clamp(a.beat || 0, 0, 1);
-    // Activity gate: near-zero when quiet so the thickness drift nearly halts.
-    var act = LABUTIL.clamp(Math.max(aLevel, (a.peak || 0) * 0.7, aBeat) * react, 0, 1);
-    var densMul = 1 + react * (0.8 * (aCent - 0.15) + 0.25 * aLevel);
-    if (densMul < 0.2) densMul = 0.2;
-    var intens = LABUTIL.clamp(0.55 + 0.85 * react * aLevel, 0, 1.4);
-    var beatRip = react * aBeat * 3.0;
-
-    var BW = s.bw || 150;
-    var BH = s.bh || 100;
-    var wantBH = Math.max(40, Math.min(130, Math.round(BW * h / Math.max(1, w))));
-    if (s.off && wantBH !== BH) {
-      try {
-        s.off = new OffscreenCanvas(BW, wantBH);
-        s.octx = s.off.getContext('2d');
-        s.img = s.octx.createImageData(BW, wantBH);
-        BH = s.bh = wantBH;
-      } catch (e) { /* keep old */ }
-    }
-
-    var img = s.img;
-    if (!img || !s.octx) {
-      ctx.strokeStyle = theme.grid;
-      ctx.beginPath();
-      ctx.moveTo(0, h / 2);
-      ctx.lineTo(w, h / 2);
-      ctx.stroke();
-      return;
-    }
-    var data = img.data;
-
-    var nIdx = LABUTIL.clamp(p.filmindex, 1, 2.4);
-    var lambda = LABUTIL.clamp(p.wavelength, 0.004, 0.05);
-    var bumprate = LABUTIL.clamp(p.bumprate, 0, 1.5);
-    var bumpcount = Math.max(1, Math.min(6, Math.round(p.bumpcount)));
-    var tilt = LABUTIL.clamp(p.tilt, 0, 1);
-
-    // delta = (2*PI/lambda)*(2*n*d) + PI, I = cos^2(delta/2).
-    // Precompute the path-to-phase scale and the amplitude unit (lobe amps are
-    // stored in wavelength units so the ring count tracks lambda sensibly).
-    var phaseScale = (LABUTIL.TAU / lambda) * (2 * nIdx);
-    var ampUnit = lambda;
-
-    // Integrate the thickness-drift phase from audio: a slow idle crawl when
-    // silent, opening up as sound arrives, so the rings nearly freeze in quiet.
-    s.ph = (s.ph || 0) + (a.dt || 0.016) * bumprate * (0.06 + 1.1 * act);
-    var drift = s.ph;
-
-    // Precompute the current lobe centers (slow drift) once per frame.
-    var lobes = s.lobes;
-    var lx = new Array(bumpcount), ly = new Array(bumpcount);
-    var lInv2s2 = new Array(bumpcount), lA = new Array(bumpcount);
-    for (var li = 0; li < bumpcount; li++) {
-      var lb = lobes[li];
-      lx[li] = lb.cx + 0.15 * Math.cos(drift + lb.ph);
-      ly[li] = lb.cy + 0.15 * Math.sin(0.8 * drift + lb.ph);
-      var sg = lb.sig;
-      lInv2s2[li] = 1 / (2 * sg * sg);
-      lA[li] = lb.amp * ampUnit;
-    }
-
-    // Wedge direction a = (1, 0.3) normalized-ish, scaled by tilt. Several
-    // wavelengths of ramp across the field straighten rings into contours.
-    var wax = 1.0, way = 0.3;
-    var wedgeAmp = tilt * 30 * ampUnit;
-
-    var aspect = BH / BW;
-    var idx = 0;
-    for (var py = 0; py < BH; py++) {
-      var wy = ((py / (BH - 1)) * 2 - 1) * aspect;
-      for (var px = 0; px < BW; px++) {
-        var wx = (px / (BW - 1)) * 2 - 1;
-
-        // Thickness field: base + sum of gaussian lobes + linear wedge.
-        var d = 1.5 * ampUnit;  // small positive base so d >= 0
-        for (var j = 0; j < bumpcount; j++) {
-          var ddx = wx - lx[j];
-          var ddy = wy - ly[j];
-          var r2 = ddx * ddx + ddy * ddy;
-          d += lA[j] * Math.exp(-r2 * lInv2s2[j]);
-        }
-        d += wedgeAmp * (wax * wx + way * wy);
-        if (d < 0) d = 0;
-
-        var delta = phaseScale * densMul * d + Math.PI;
-        if (beatRip > 0.001) {
-          var rr = Math.sqrt(wx * wx + wy * wy);
-          delta += beatRip * Math.sin(rr * 14 - t * 7);
-        }
-        var c = Math.cos(delta * 0.5);
-        var I = c * c;            // two-beam reflectance cos^2(delta/2)
-        // crisp the fringes slightly
-        I = Math.pow(I, 1.2);
-        I *= intens;
-        if (!isFinite(I)) I = 0;
-        I = LABUTIL.clamp(I, 0, 1);
-
-        data[idx] = (I * 255) | 0;
-        data[idx + 1] = (I * 185) | 0;
-        data[idx + 2] = (I * 70) | 0;
-        data[idx + 3] = 255;
-        idx += 4;
-      }
-    }
-
-    s.octx.putImageData(img, 0, 0);
-    ctx.imageSmoothingEnabled = true;
-    if (ctx.imageSmoothingQuality !== undefined) ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(s.off, 0, 0, BW, BH, 0, 0, w, h);
-  }
-});
-
 
 
 /* ===== tonnetz-lattice.js ===== */
@@ -9754,12 +9099,12 @@ LAB.register({
     'spectral-smear', 'spectrogram-scroll', 'slit-scan', 'reversible-spectrogram', 'reaction-diffusion',
     'schlieren-plume', 'wave-membrane', 'faraday-caustics', 'faraday-interference', 'spatial-fourier',
     'julia-fractal', 'walking-droplet', 'belousov-zhabotinsky', 'pointcloud-rotate', 'chladni-bessel',
-    'chladni-nodal', 'chladni-sand', 'moire-grids', 'topographic-contour', 'blue-noise-stipple',
+    'chladni-nodal', 'chladni-sand', 'moire-grids', 'topographic-contour',
     'ascii-waveform', 'halftone-raster', 'error-diffusion-dither', 'fft-bars', 'waveform-ribbon',
     'curl-flow-field', 'kelvin-helmholtz', 'rayleigh-benard', 'granular-cloud', 'particle-envelope-swarm',
     'phyllotaxis-vogel', 'strange-attractor', 'soliton-kdv', 'harmonic-ladder', 'tonnetz-lattice',
-    'lichtenberg-breakdown', 'magnetic-pendulum-basins', 'glyph-field', 'phase-rings', 'feedback-trails',
-    'ferrofluid-spikes', 'gradient-bloom-field', 'photoelastic-fringes', 'thin-film-fringes'
+    'lichtenberg-breakdown', 'magnetic-pendulum-basins', 'glyph-field', 'feedback-trails',
+    'ferrofluid-spikes', 'gradient-bloom-field'
   ];
   function orank(id) { var i = ORDER.indexOf(id); return i < 0 ? 1e6 : i; }
   function norm(g) { return String(g || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim(); }

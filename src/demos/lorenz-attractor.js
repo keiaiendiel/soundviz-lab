@@ -13,7 +13,7 @@ LAB.register({
     { key: 'rho', label: 'rho (Rayleigh)', min: 0.5, max: 90, step: 0.5, value: 28 },
     { key: 'sigma', label: 'sigma (Prandtl)', min: 1, max: 20, step: 0.5, value: 10 },
     { key: 'speed', label: 'Integration speed', min: 1, max: 30, step: 1, value: 12 },
-    { key: 'trail', label: 'Trail length', min: 200, max: 8000, step: 100, value: 3000 },
+    { key: 'trail', label: 'Trail length', min: 200, max: 8000, step: 100, value: 5200 },
     { key: 'projAngle', label: 'View rotation', min: 0, max: 6.28, step: 0.05, value: 0.6 },
     { key: 'react', label: 'Audio drive', min: 0, max: 1.5, step: 0.05, value: 0.85 }
   ],
@@ -62,7 +62,7 @@ LAB.register({
     var sigma = LABUTIL.clamp(p.sigma + (ce - 0.5) * 3 * react, 1, 20);
     // near-still in silence: integration nearly halts when quiet, runs with sound
     var speed = Math.round(LABUTIL.clamp(p.speed * 1.3 * act, 0, 60));
-    var glow = LABUTIL.clamp(0.85 + react * (0.4 * lv + 0.5 * bt), 0.4, 1.6);
+    var glow = LABUTIL.clamp(1.05 + react * (0.4 * lv + 0.5 * bt), 0.5, 1.8);
     var trail = Math.round(LABUTIL.clamp(p.trail, 200, s.MAXTRAIL));
     var ang = LABUTIL.clamp(p.projAngle, 0, 6.2832);
     var beta = s.beta;
@@ -109,7 +109,7 @@ LAB.register({
     if (nDraw < 2) return;
 
     var ca = Math.cos(ang), sa = Math.sin(ang);
-    var scale = Math.min(w, h) / 60;
+    var scale = Math.min(w, h) / 48;
     var cx = w * 0.5, cy = h * 0.5;
 
     function project(px, py, pz) {
@@ -121,7 +121,7 @@ LAB.register({
     var startPt = (s.head - nDraw + cap) % cap;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    ctx.lineWidth = 1.25;
+    ctx.lineWidth = LABUTIL.clamp(2.2 + react * 1.0 * lv, 1.6, 4);
 
     var BANDS = 32;
     var per = Math.ceil((nDraw - 1) / BANDS);
@@ -129,7 +129,7 @@ LAB.register({
       var sIdx = b * per;
       if (sIdx >= nDraw - 1) break;
       var eIdx = Math.min(nDraw - 1, sIdx + per);
-      var aMid = LABUTIL.lerp(0.14, 1.0, (sIdx + eIdx) * 0.5 / Math.max(1, nDraw - 1));
+      var aMid = LABUTIL.lerp(0.30, 1.0, (sIdx + eIdx) * 0.5 / Math.max(1, nDraw - 1));
       ctx.strokeStyle = LABUTIL.rgba(theme.ink, LABUTIL.clamp(aMid * glow, 0, 1));
       ctx.beginPath();
       var pi0 = (startPt + sIdx) % cap;
@@ -149,7 +149,7 @@ LAB.register({
     if (isFinite(Ph[0]) && isFinite(Ph[1])) {
       ctx.fillStyle = LABUTIL.rgba(theme.accent, 1);
       ctx.beginPath();
-      var headR = LABUTIL.clamp(2 + react * (2.5 * lv + 3.5 * bt), 1, 9);
+      var headR = LABUTIL.clamp(2.8 + react * (2.5 * lv + 3.5 * bt), 1.5, 10);
       ctx.arc(Ph[0], Ph[1], headR, 0, LABUTIL.TAU);
       ctx.fill();
     }
